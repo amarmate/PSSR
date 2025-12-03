@@ -1,0 +1,130 @@
+[project]
+name = "pssr"
+version = "0.1.0"
+description = "Python Implementation of Piecewise Specialist Symbolic Regression"
+authors = [
+    {name = "Mateus Amaral",email = "mbaptistaamaral@gmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy (>=2.3.4,<3.0.0)",
+    "scikit-learn (>=1.7.2,<2.0.0)",
+    "pytest (>=9.0.1,<10.0.0)",
+    "ruff (>=0.14.5,<0.15.0)",
+    "black (>=25.11.0,<26.0.0)",
+    "pandas (>=2.3.3,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [{include = "pssr", from = "src"}]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "B",      # flake8-bugbear (only critical bugs)
+    "T10",    # flake8-debugger
+    "T20",    # flake8-print
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E722",   # bare except
+    "E731",   # lambda assignment
+    "E741",   # ambiguous variable name
+    "E742",   # ambiguous class name
+    "E743",   # ambiguous function name
+    "B008",   # do not perform function calls in argument defaults
+    "B006",   # mutable argument defaults
+    "B904",   # raise without specifying exception
+    "N806",   # variable in function should be lowercase
+    "N803",   # argument name should be lowercase
+    "N802",   # function name should be lowercase
+    "N801",   # class name should use CapWords
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]  # unused imports allowed in __init__.py
+"tests/**/*.py" = ["E501", "F401", "F811"]  # allow long lines, unused imports in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["pssr"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+warn_unused_ignores = true
+
