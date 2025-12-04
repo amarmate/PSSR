@@ -7,23 +7,14 @@ A Python library implementing **Piecewise Specialist Symbolic Regression (PSSR)*
 
 ## Overview
 
-PSSR is based on the Multi-SLIM approach and extends traditional Genetic Programming (GP) by:
+PSSR is a piecewise function approximation method that extends traditional Genetic Programming (GP) by:
 
-1. **Training Specialist Models**: Evolves a population of GP individuals, each specializing in different regions of the input space
+1. **Training Specialist Models**: Evolves a population of GP individuals using lexicase selection, each specializing in different regions of the input space
 2. **Evolving Ensemble Trees**: Creates conditional routing trees that intelligently combine specialists based on learned conditions
 
 The resulting model partitions the input space and routes inputs to appropriate specialist models, often achieving better performance than single GP models.
 
-## Features
-
-- 🧬 **Two-Phase Evolution**: Separate evolution phases for specialists and ensemble routing
-- 🎯 **Specialist Ensembles**: Multiple GP models that specialize in different data regions
-- 🌳 **Conditional Routing**: Learned conditions that route inputs to appropriate specialists
-- ⚡ **Performance Optimized**: Cached semantics for fast ensemble evaluation
-- 🔄 **Warm Start Support**: Continue training from existing populations
-- 📊 **scikit-learn Compatible**: Implements `RegressorMixin` for easy integration
-- 🎲 **Reproducible**: Random state control for reproducible results
-- 📈 **Comprehensive Logging**: Track fitness evolution and model statistics
+For more details and the original implementation, see [my thesis](http://hdl.handle.net/10362/190604).
 
 ## Installation
 
@@ -135,65 +126,6 @@ predictions = gp_model.predict(X)
 - **`Condition`**: GP tree used as a routing predicate
 - **`EnsembleIndividual`**: Conditional tree structure combining specialists
 
-## API Reference
-
-### PSSRegressor
-
-Main regressor class implementing the PSSR algorithm.
-
-#### Parameters
-
-**Specialist Parameters:**
-- `specialist_pop_size` (int, default=100): Population size for specialist evolution
-- `specialist_max_depth` (int, default=6): Maximum tree depth for specialists
-- `specialist_init_depth` (int, default=2): Initial tree depth for specialists
-
-**Ensemble Parameters:**
-- `ensemble_pop_size` (int, default=100): Population size for ensemble evolution
-- `ensemble_max_depth` (int, default=4): Maximum depth for ensemble trees
-- `depth_condition` (int, default=3): Maximum depth for condition trees
-
-**Variation:**
-- `p_xo` (float, default=0.5): Probability of crossover vs mutation
-
-**General:**
-- `random_state` (int, default=42): Random seed for reproducibility
-- `normalize` (bool, default=False): Whether to normalize input data
-- `functions` (list[str] or FunctionSet, default=['add', 'sub', 'mul', 'div']): Function set for GP trees
-- `condition_functions` (list[str] or FunctionSet, optional): Function set for conditions (defaults to `functions`)
-- `constant_range` (float, default=1.0): Range for constant terminals
-- `selector` (str or Callable, default='tournament'): Selection method
-
-#### Methods
-
-- `fit(X, y, X_test=None, y_test=None, specialist_n_gen=100, ensemble_n_gen=100, verbose=0, warm_start=False)`: Fit the model
-- `predict(X)`: Make predictions
-- `score(X, y)`: Calculate R² score (scikit-learn compatible)
-
-#### Attributes
-
-- `specialists_`: Dictionary of trained specialists
-- `best_ensemble_`: Best ensemble individual
-- `specialist_population_`: Final specialist population
-- `ensemble_population_`: Final ensemble population
-- `log_`: Training log with fitness history
-
-### GPRegressor
-
-Base Genetic Programming regressor.
-
-#### Parameters
-
-- `population_size` (int, default=100): Population size
-- `max_depth` (int, default=6): Maximum tree depth
-- `init_depth` (int, default=2): Initial tree depth
-- `p_xo` (float, default=0.5): Crossover probability
-- `random_state` (int, default=42): Random seed
-- `normalize` (bool, default=False): Normalize data
-- `functions` (list[str] or FunctionSet): Function set
-- `constant_range` (float, default=1.0): Constant range
-- `selector` (str or Callable, default='tournament'): Selection method
-
 ## Examples
 
 ### Custom Function Set
@@ -233,59 +165,22 @@ ensemble_tree = model.best_ensemble_.collection
 fitness_history = model.log_['best_fitness']
 ```
 
-## Performance Considerations
-
-- **Cached Semantics**: Specialist outputs are pre-computed and cached for fast ensemble evaluation
-- **Vectorized Operations**: Uses NumPy for efficient batch operations
-- **Combined Train/Test**: Single array with slicing for efficient memory usage
-- **Warm Start**: Continue training without reinitializing populations
-
-## Testing
-
-Run the test suite:
-
-```bash
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_pssr.py
-
-# Run with coverage
-pytest --cov=src/pssr tests/
-```
-
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing to the project.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Citation
+### Citation
 
 If you use PSSR in your research, please cite:
 
-```bibtex
-@software{pssr2024,
-  title={PSSR: Piecewise Specialist Symbolic Regression},
-  author={Amaral, Mateus},
-  year={2024},
-  url={https://github.com/yourusername/PSSR}
+```
+@mastersthesis{Amaral2025PSSR,
+  title        = {Piecewise Symbolic Regression via Lexciase-Guided Specialist Ensembles},
+  author       = {Amaral, Mateus Baptista},
+  advisor      = {Vanneschi, Leonardo},
+  school       = {NOVA Information Management School (NOVA IMS)},
+  year         = {2025},
+  type         = {Master's Thesis},
+  url          = {http://hdl.handle.net/10362/190604}
 }
 ```
-
-## Acknowledgments
-
-- Based on the Multi-SLIM approach for piecewise symbolic regression
-- Built on top of Genetic Programming principles
-- Inspired by ensemble methods and specialist models
-
-## Contact
-
-For questions, issues, or contributions, please open an issue on GitHub or contact the maintainer.
-
----
-
-**Note**: This library is under active development. API may change in future versions.

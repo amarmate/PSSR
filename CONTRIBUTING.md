@@ -66,12 +66,12 @@ The project uses:
 
 We welcome various types of contributions:
 
-- 🐛 **Bug fixes**: Fix issues in existing code
-- ✨ **New features**: Add new functionality
-- 📚 **Documentation**: Improve documentation
-- 🧪 **Tests**: Add or improve test coverage
-- ⚡ **Performance**: Optimize existing code
-- 🔧 **Refactoring**: Improve code structure
+- **Bug fixes**: Fix issues in existing code
+- **New features**: Add new functionality
+- **Documentation**: Improve documentation
+- **Tests**: Add or improve test coverage
+- **Performance**: Optimize existing code
+- **Refactoring**: Improve code structure
 
 ### Before You Start
 
