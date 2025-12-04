@@ -5,12 +5,12 @@ This module provides mutation and crossover operators for evolving
 ensemble individuals with conditional routing to specialists.
 """
 
-import random
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 import numpy as np
 
 from pssr.core.primitives import PrimitiveSet
+from pssr.core.representations.population import Population
 from pssr.pssr_model.condition import Condition
 from pssr.pssr_model.ensemble_individual import EnsembleIndividual, EnsembleTreeRepr
 from pssr.pssr_model.ensemble_initialization import (
@@ -648,6 +648,8 @@ def ensemble_variator(
     """
     Create a variator function that applies crossover or mutation.
     
+    Compatible with GPevo: accepts Population and returns Population.
+    
     Parameters
     ----------
     crossover : Callable
@@ -660,22 +662,26 @@ def ensemble_variator(
     Returns
     -------
     Callable
-        Variator function
+        Variator function that accepts (Population, PrimitiveSet, rng, max_depth)
+        and returns (Population, timing_dict)
     """
     def variator(
-        parents: list[EnsembleIndividual],
+        parents: Population,
         primitive_set: PrimitiveSet,
         rng: np.random.Generator,
         max_depth: int,
-    ) -> tuple[list[EnsembleIndividual], dict]:
+    ) -> tuple[Population, dict]:
         """Apply variation to create offspring population."""
         import time
+        
+        # Extract individuals list from Population
+        parent_list = parents.population
         
         offspring = []
         xo_time = 0.0
         mut_time = 0.0
         
-        pop_size = len(parents)
+        pop_size = len(parent_list)
         i = 0
         
         while len(offspring) < pop_size:
@@ -683,7 +689,7 @@ def ensemble_variator(
                 # Crossover
                 start = time.perf_counter()
                 off1, off2 = crossover(
-                    parents[i], parents[i + 1],
+                    parent_list[i], parent_list[i + 1],
                     primitive_set, rng, max_depth
                 )
                 xo_time += time.perf_counter() - start
@@ -693,7 +699,7 @@ def ensemble_variator(
             else:
                 # Mutation
                 start = time.perf_counter()
-                off = mutation(parents[i % pop_size])
+                off = mutation(parent_list[i % pop_size])
                 mut_time += time.perf_counter() - start
                 
                 offspring.append(off)
@@ -707,7 +713,7 @@ def ensemble_variator(
             "mut_time": mut_time,
         }
         
-        return offspring, timing_info
+        return Population(offspring), timing_info
     
     return variator
 

@@ -1,0 +1,22 @@
+# Cursor Rules for PSSR Project
+
+## Code Style and Best Practices
+
+### Logging
+- **Always use Python's `logging` module instead of `print()` statements**
+- Use `logging.info()` for informational messages (e.g., verbose output, progress updates)
+- Use `logging.warning()` for warnings
+- Use `logging.error()` for errors
+- Use `logging.debug()` for debug messages
+- Configure logging at the module level: `logger = logging.getLogger(__name__)`
+- Never use `print()` for user-facing output or debugging
+
+### Type Hints
+- Use type hints for all function parameters and return values
+- Use `Optional[T]` for nullable types
+- Use `Union[T1, T2]` for multiple possible types
+
+### Documentation
+- Include docstrings for all public classes and methods
+- Use NumPy-style docstrings with Parameters, Returns, and Raises sections
+

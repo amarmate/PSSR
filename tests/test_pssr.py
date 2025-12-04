@@ -41,14 +41,16 @@ def test_pssr_with_test_data():
     y_train, y_test = y[:70], y[70:]
 
     model = PSSRegressor(
-        specialist_pop_size=20,
-        ensemble_pop_size=20,
+        specialist_pop_size=500,
+        ensemble_pop_size=100,
         random_state=0,
+        specialist_selector="dalex",
+        specialist_selector_args
     )
     model.fit(
         X_train, y_train,
         X_test=X_test, y_test=y_test,
-        specialist_n_gen=5, ensemble_n_gen=5,
+        specialist_n_gen=100, ensemble_n_gen=2000,
         verbose=1,
     )
     
