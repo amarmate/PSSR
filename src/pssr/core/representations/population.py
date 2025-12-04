@@ -1,13 +1,20 @@
 import logging
-from typing import Optional, Any, Union, Sequence, Iterable
+from typing import Any, Callable, Iterable, Optional, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
 
-from pssr.core.representations.individual import Individual
 from pssr.core.primitives import PrimitiveSet
+from pssr.core.representations.individual import Individual
 
 Array = npt.NDArray[np.float64]
+
+# Default fitness function (RMSE) - defined locally to avoid circular imports
+def _default_rmse(y_true: Array, y_pred: Array) -> Array:
+    """Default RMSE fitness function."""
+    errors = y_pred - y_true
+    mse_values = np.mean(errors**2, axis=1)
+    return np.sqrt(mse_values)
 
 class Population:
     """
@@ -56,6 +63,9 @@ class Population:
             # Slice indices for combined evaluation
             self.train_slice: Optional[slice] = None
             self.test_slice: Optional[slice] = None
+            
+            # Optimization direction (True = maximize, False = minimize)
+            self._maximize: bool = False
         
     def __len__(self) -> int:
         return len(self.population)
@@ -161,24 +171,53 @@ class Population:
             
             self.errors_case = standardized_errs
 
-    def evaluate(self, 
-                 X: Optional[Array], 
-                 y: Array) -> None:
+    def evaluate(
+        self, 
+        X: Optional[Array], 
+        y: Array,
+        fitness_function: Optional[Callable[[Array, Array], Array]] = None,
+        maximize: bool = False,
+    ) -> None:
         """
-        Calculate fitness (RMSE) for all individuals for both training and testing data.
+        Calculate fitness for all individuals for both training and testing data.
+        
+        Parameters
+        ----------
+        X : Optional[Array]
+            Input features. Only needed if semantics haven't been calculated yet.
+        y : Array
+            Combined target values (train + test).
+        fitness_function : Optional[Callable]
+            Vectorized fitness function. Takes (y_true, y_pred) where y_pred has shape
+            (n_individuals, n_samples) and returns fitness values with shape (n_individuals,).
+            Default is RMSE.
+        maximize : bool, default=False
+            If True, higher fitness values are better (maximization).
+            If False, lower fitness values are better (minimization).
         """
+        self._maximize = maximize
+        
+        if fitness_function is None:
+            fitness_function = _default_rmse
         
         if self.errors_case is None and X is not None:
             logging.warning("[population.evaluate] Training semantics not calculated. Calculating now.")
             self.calculate_semantics(X)
             self.calculate_errors_case(y)
         
-        if self.errors_case is None:
-            raise ValueError("[population.evaluate] Errors case not calculated. Call calculate_errors_case(y) first.")
+        if self.train_semantics is None:
+            raise ValueError("[population.evaluate] Train semantics not calculated. Call calculate_semantics(X) first.")
         
-        # Calculate training fitness per individual: (n_individuals,)
-        mse_train = np.mean(self.errors_case**2, axis=1)
-        self.train_fitness = np.sqrt(mse_train)
+        # Get training target values
+        if self.train_slice is None:
+            self.train_slice = slice(0, y.shape[0])
+        
+        train_slice = self.train_slice  # Type narrowing for linter
+        y_train = y[train_slice]
+        
+        # Calculate training fitness using the fitness function
+        # y_pred shape: (n_individuals, n_samples), y_true shape: (n_samples,)
+        self.train_fitness = fitness_function(y_train, self.train_semantics)
         
         # Update individual fitness values
         assert self.train_fitness is not None  # Type narrowing for linter
@@ -187,13 +226,10 @@ class Population:
         
         # Calculate test fitness if test data exists
         if self.test_semantics is not None and self.test_slice is not None:
-            # test_semantics shape: (n_individuals, n_test_samples)
-            # y[self.test_slice] shape: (n_test_samples,)
-            # Broadcasting: (n_individuals, n_test_samples) - (n_test_samples,) -> (n_individuals, n_test_samples)
             test_slice = self.test_slice  # Type narrowing for linter
-            test_errors = np.abs(self.test_semantics - y[test_slice])
-            mse_test = np.mean(test_errors**2, axis=1)
-            self.test_fitness = np.sqrt(mse_test)
+            y_test = y[test_slice]
+            
+            self.test_fitness = fitness_function(y_test, self.test_semantics)
             
             # Update individual test fitness values
             assert self.test_fitness is not None  # Type narrowing for linter
@@ -204,12 +240,18 @@ class Population:
 
     def get_best_individual(self) -> Any:
         """
-        Get the individual with the best (lowest) training fitness.
+        Get the individual with the best training fitness.
+        
+        For minimization (default), returns individual with lowest fitness.
+        For maximization, returns individual with highest fitness.
         """
         if self.train_fitness is None:
             raise ValueError("Training fitness must be calculated before getting best individual.")
         
-        best_idx = np.argmin(self.train_fitness)
+        if self._maximize:
+            best_idx = np.argmax(self.train_fitness)
+        else:
+            best_idx = np.argmin(self.train_fitness)
         return self.population[best_idx]    
     
     def copy(self) -> "Population":
@@ -248,38 +290,71 @@ class Population:
             return cls(list[Any](pop))
         raise TypeError(f"Unsupported population type: {type(pop)!r}")
 
-    def fit_and_assess(self, X: Array, y: Array) -> dict[str, Any]:
+    def fit_and_assess(
+        self, 
+        X: Array, 
+        y: Array,
+        fitness_function: Optional[Callable[[Array, Array], Array]] = None,
+        maximize: bool = False,
+    ) -> dict[str, Any]:
         """
         Calculate jointly train and test fitness/errors and return a dictionary of generation metrics.
+        
+        Parameters
+        ----------
+        X : Array
+            Input features.
+        y : Array
+            Combined target values (train + test).
+        fitness_function : Optional[Callable]
+            Vectorized fitness function. Default is RMSE.
+        maximize : bool, default=False
+            If True, higher fitness values are better (maximization).
+            
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary of generation metrics including best_fitness, mean_fitness, etc.
         """
-        self.evaluate(X, y)
+        self.evaluate(X, y, fitness_function=fitness_function, maximize=maximize)
         
         if self.train_fitness is None:
             raise RuntimeError("Population fitness calculation failed")
         
-        # Find best
-        best_idx = int(np.argmin(self.train_fitness))
+        # Find best (depends on optimization direction)
+        if maximize:
+            best_idx = int(np.argmax(self.train_fitness))
+        else:
+            best_idx = int(np.argmin(self.train_fitness))
         best_ind = self.population[best_idx]
         
         # Helper to safely get attributes if they exist
         best_depth = getattr(best_ind, 'depth', 0)
         best_size = getattr(best_ind, 'total_nodes', 0)
 
+        # Determine worst based on optimization direction
+        if maximize:
+            worst_fitness = float(np.min(self.train_fitness))
+        else:
+            worst_fitness = float(np.max(self.train_fitness))
+        
         metrics = {
-            # "fitness": self.train_fitness.copy(),
-            # "errors_case": self.errors_case.copy() if self.errors_case is not None else None,
             "best_idx": best_idx,
             "best_fitness": float(self.train_fitness[best_idx]),
             "best_individual": best_ind,
             "mean_fitness": float(np.mean(self.train_fitness)),
             "std_fitness": float(np.std(self.train_fitness)),
-            "worst_fitness": float(np.max(self.train_fitness)),
+            "worst_fitness": worst_fitness,
             "best_depth": float(best_depth),
             "best_size": float(best_size),
         }
         
         if self.test_fitness is not None:
-            metrics["best_test_fitness"] = float(np.min(self.test_fitness))
+            if maximize:
+                best_test = float(np.max(self.test_fitness))
+            else:
+                best_test = float(np.min(self.test_fitness))
+            metrics["best_test_fitness"] = best_test
             metrics["mean_test_fitness"] = float(np.mean(self.test_fitness))
 
         return metrics
@@ -287,6 +362,9 @@ class Population:
     def extract_elites(self, n_elites: int) -> list:
         """
         Return a list of the top n_elites individuals (copies).
+        
+        For minimization, returns individuals with lowest fitness.
+        For maximization, returns individuals with highest fitness.
         """
         if n_elites <= 0:
             return []
@@ -294,7 +372,13 @@ class Population:
             raise ValueError("Fitness must be evaluated before extracting elites.")
 
         n_elites = min(n_elites, len(self.population))
-        elite_indices = np.argsort(self.train_fitness)[:n_elites]
+        
+        if self._maximize:
+            # For maximization, sort descending (highest first)
+            elite_indices = np.argsort(self.train_fitness)[::-1][:n_elites]
+        else:
+            # For minimization, sort ascending (lowest first)
+            elite_indices = np.argsort(self.train_fitness)[:n_elites]
         
         return [self.population[idx].copy() for idx in elite_indices]
 

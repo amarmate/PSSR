@@ -45,13 +45,16 @@ def test_pssr_with_test_data():
         ensemble_pop_size=100,
         random_state=0,
         specialist_selector="dalex",
-        specialist_selector_args
+        ensemble_selector="tournament",
+        specialist_selector_args={"particularity_pressure": 20},
+        ensemble_selector_args={"pool_size": 2},
+        fitness_function="r2",
     )
     model.fit(
         X_train, y_train,
         X_test=X_test, y_test=y_test,
-        specialist_n_gen=100, ensemble_n_gen=2000,
-        verbose=1,
+        specialist_n_gen=100, ensemble_n_gen=500,
+        verbose=50,
     )
     
     y_pred_train = model.predict(X_train)

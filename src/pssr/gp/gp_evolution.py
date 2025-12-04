@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from typing import Callable
+from typing import Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
 
+from pssr.core.fitness import fetch_fitness, is_maximization
 from pssr.core.primitives import PrimitiveSet
 from pssr.core.representations.individual import Individual
 from pssr.core.representations.population import Population
+from pssr.core.verbose import VerboseHandler
 from pssr.gp.gp_utils import LogDict, init_log, print_verbose_report, update_log
 
 Array = npt.NDArray[np.float64]
@@ -29,7 +31,9 @@ def GPevo(
     train_slice: slice,
     test_slice: slice | None = None,
     elitism: int = 1,
-    verbose: int = 0,
+    verbose: Union[int, str] = 0,
+    fitness_function: Union[str, Callable[[Array, Array], Array]] = "rmse",
+    maximize: Optional[bool] = None,
 ) -> tuple[Population, Individual, LogDict]:
     """
     Main Genetic Programming evolutionary loop.
@@ -61,8 +65,18 @@ def GPevo(
         Maximum allowed depth for individuals (passed to variator).
     elitism : int
         Number of top individuals to copy directly to the next generation.
-    verbose : int, default=0
-        Verbosity level. If > 0, prints progress report after each generation.
+    verbose : Union[int, str], default=0
+        Verbosity level:
+        - 0: Silent
+        - 1: Print every generation
+        - N (int > 1): Print every N generations
+        - "bar": Show tqdm progress bar
+    fitness_function : Union[str, Callable], default="rmse"
+        Fitness function to use. Either a string name ("rmse", "mse", "mae", "r2")
+        or a callable that accepts (y_true, y_pred) and returns fitness values.
+    maximize : Optional[bool], default=None
+        Whether higher fitness values are better. If None, automatically determined
+        from the fitness function name (e.g., R² uses maximization).
 
     Returns
     -------
@@ -85,11 +99,28 @@ def GPevo(
             f"Got X.shape[0]={X.shape[0]} and y.shape[0]={y.shape[0]}"
         )
 
+    # Resolve fitness function and optimization direction
+    if isinstance(fitness_function, str):
+        fitness_fn = fetch_fitness(fitness_function)
+        if maximize is None:
+            maximize = is_maximization(fitness_function)
+    else:
+        fitness_fn = fitness_function
+        if maximize is None:
+            maximize = False  # Default to minimization for custom functions
+
     # Initialize log with test fitness support if test data provided
     has_test_data = test_slice is not None
     log = init_log(include_test=has_test_data)
-    best_fitness = np.inf
+    # Initialize best_fitness based on optimization direction
+    best_fitness = -np.inf if maximize else np.inf
     cumulative_time = 0.0
+    
+    # Initialize verbose handler
+    verbose_handler = VerboseHandler(verbose, n_generations)
+    
+    # Get selector name for verbose reporting
+    selector_name = _get_selector_name(selector)
     
     # Precompute semantics for initial population (train + optional test)
     population_obj.set_slices(train_slice, test_slice)
@@ -98,7 +129,7 @@ def GPevo(
 
     # Evaluate on training set (semantics already computed)
     eval_start = time.perf_counter()
-    metrics = population_obj.fit_and_assess(X, y)
+    metrics = population_obj.fit_and_assess(X, y, fitness_function=fitness_fn, maximize=maximize)
     eval_time = time.perf_counter() - eval_start
     cumulative_time += eval_time
     
@@ -109,17 +140,7 @@ def GPevo(
     elites = population_obj.extract_elites(elitism)
 
     # Verbose reporting for generation 0
-    if verbose > 0:
-        # Try to get selector name (handles closures from factory functions)
-        selector_name = None
-        if hasattr(selector, "__name__"):
-            selector_name = selector.__name__
-        elif hasattr(selector, "__qualname__"):
-            # For closures, try to extract name from qualname
-            qualname = selector.__qualname__
-            if "." in qualname:
-                selector_name = qualname.split(".")[-1]
-        
+    if verbose_handler.should_print(0):
         print_verbose_report(
             generation=0,
             metrics=metrics,
@@ -130,65 +151,77 @@ def GPevo(
             selector_name=selector_name,
             first=True,
         )
+    verbose_handler.update(0, metrics)
 
     if n_generations == 0:
+        verbose_handler.close()
         return population_obj, best_individual, log
 
-    for generation in range(1, n_generations + 1):
-        gen_start = time.perf_counter()
-        parents = _apply_selector(selector, population_obj, rng)
-        offspring, timing_info = variator(parents, primitive_set, rng, max_depth)
+    try:
+        for generation in range(1, n_generations + 1):
+            gen_start = time.perf_counter()
+            parents = _apply_selector(selector, population_obj, rng)
+            offspring, timing_info = variator(parents, primitive_set, rng, max_depth)
 
-        if elitism > 0 and elites:
-            offspring.inject_elites(elites, rng)
+            if elitism > 0 and elites:
+                offspring.inject_elites(elites, rng)
 
-        # Recompute semantics for offspring (train + optional test)
-        offspring.set_slices(train_slice, test_slice)
-        offspring.calculate_semantics(X)
-        offspring.calculate_errors_case(y)
+            # Recompute semantics for offspring (train + optional test)
+            offspring.set_slices(train_slice, test_slice)
+            offspring.calculate_semantics(X)
+            offspring.calculate_errors_case(y)
 
-        eval_start = time.perf_counter()
-        metrics = offspring.fit_and_assess(X, y)
-        eval_time = time.perf_counter() - eval_start
-        gen_time = time.perf_counter() - gen_start
-        cumulative_time += gen_time
+            eval_start = time.perf_counter()
+            metrics = offspring.fit_and_assess(X, y, fitness_function=fitness_fn, maximize=maximize)
+            eval_time = time.perf_counter() - eval_start
+            gen_time = time.perf_counter() - gen_start
+            cumulative_time += gen_time
 
-        population_obj = offspring
-        update_log(log, generation=generation, metrics=metrics, eval_time=eval_time)
+            population_obj = offspring
+            update_log(log, generation=generation, metrics=metrics, eval_time=eval_time)
 
-        if metrics["best_fitness"] < best_fitness:
-            best_fitness = metrics["best_fitness"]
-            best_individual = metrics["best_individual"].copy()
-
-        elites = population_obj.extract_elites(elitism)
-
-        # Verbose reporting for each generation
-        if verbose > 0:
-            # Try to get selector name (handles closures from factory functions)
-            selector_name = None
-            if hasattr(selector, "__name__"):
-                selector_name = selector.__name__
-            elif hasattr(selector, "__qualname__"):
-                # For closures, try to extract name from qualname
-                qualname = selector.__qualname__
-                if "." in qualname:
-                    selector_name = qualname.split(".")[-1]
-            
-            print_verbose_report(
-                generation=generation,
-                metrics=metrics,
-                eval_time=eval_time,
-                population=population_obj,
-                X=X[train_slice],
-                gen_time=cumulative_time,
-                mut_time=timing_info.get("mut_time"),
-                xo_time=timing_info.get("xo_time"),
-                selector_name=selector_name,
-                lex_rounds=None,
-                first=False,
+            # Update best individual based on optimization direction
+            is_better = (
+                metrics["best_fitness"] > best_fitness if maximize 
+                else metrics["best_fitness"] < best_fitness
             )
+            if is_better:
+                best_fitness = metrics["best_fitness"]
+                best_individual = metrics["best_individual"].copy()
+
+            elites = population_obj.extract_elites(elitism)
+
+            # Verbose reporting for each generation
+            if verbose_handler.should_print(generation):
+                print_verbose_report(
+                    generation=generation,
+                    metrics=metrics,
+                    eval_time=eval_time,
+                    population=population_obj,
+                    X=X[train_slice],
+                    gen_time=cumulative_time,
+                    mut_time=timing_info.get("mut_time"),
+                    xo_time=timing_info.get("xo_time"),
+                    selector_name=selector_name,
+                    lex_rounds=None,
+                    first=False,
+                )
+            verbose_handler.update(generation, metrics)
+    finally:
+        verbose_handler.close()
 
     return population_obj, best_individual, log
+
+
+def _get_selector_name(selector: Callable) -> Optional[str]:
+    """Extract selector name from function or closure."""
+    if hasattr(selector, "__name__"):
+        return selector.__name__
+    elif hasattr(selector, "__qualname__"):
+        qualname = selector.__qualname__
+        if "." in qualname:
+            return qualname.split(".")[-1]
+    return None
 
 
 def _apply_selector(

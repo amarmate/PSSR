@@ -58,6 +58,7 @@ def profile_gp_regressor():
         selector="dalex",
         p_xo=0.8,
         selector_args={"particularity_pressure": 10.0},
+        fitness_function='r2'
     )
     
     print(f"\nGPRegressor settings:")
@@ -72,7 +73,7 @@ def profile_gp_regressor():
     profiler = cProfile.Profile()
     profiler.enable()
     
-    gp.fit(X_train, y_train, X_test=X_test, y_test=y_test, n_gen=500, verbose=1)
+    gp.fit(X_train, y_train, X_test=X_test, y_test=y_test, n_gen=500, verbose='bar')
     
     profiler.disable()
     

@@ -1,8 +1,10 @@
 from typing import Callable, Optional, Union
 
 import numpy as np
+import numpy.typing as npt
 from sklearn.base import RegressorMixin
 
+from pssr.core.fitness import fetch_fitness
 from pssr.core.normalization import NormalizationMixin
 from pssr.core.primitives import FunctionSet, PrimitiveSet
 from pssr.core.representations.individual import Individual
@@ -13,31 +15,80 @@ from pssr.gp.gp_initialization import fetch_initializer
 from pssr.gp.gp_presets import fetch_preset
 from pssr.gp.gp_variation import fetch_crossover, fetch_mutation, variator_fun
 
+Array = npt.NDArray[np.float64]
+
 
 class GPRegressor(NormalizationMixin, RegressorMixin):
-    def __init__(self,
-                 population_size: int = 100, 
-                 init_depth: int = 2,
-                 max_depth: int = 6, 
-                 p_xo: float = 0.8, 
-                 random_state: int = 42,
-                 normalize: bool = False,
-                 
-                 preset: Optional[str] = None,
-                 
-                 functions: Optional[FunctionSet] = None,
-                 constant_range : Optional[float] = None,
-                 selector: Union[str, Callable] = "tournament",
-                 initializer: Union[str, Callable] = "rhh",
-                 crossover: Union[str, Callable] = "single_point",
-                 mutation: Union[str, Callable] = "subtree",
-                 
-                 X_scaler = None,
-                 y_scaler = None, 
-                 **params) -> None:
+    """
+    Genetic Programming Regressor with sklearn-compatible interface.
+    
+    Parameters
+    ----------
+    population_size : int, default=100
+        Number of individuals in the population.
+    init_depth : int, default=2
+        Initial tree depth for population initialization.
+    max_depth : int, default=6
+        Maximum allowed tree depth.
+    p_xo : float, default=0.8
+        Probability of crossover vs mutation.
+    random_state : int, default=42
+        Random seed for reproducibility.
+    normalize : bool, default=False
+        Whether to normalize input features and targets.
+    preset : Optional[str], default=None
+        Preset configuration name (overrides individual parameters).
+    functions : Optional[FunctionSet], default=None
+        Functions available for tree construction.
+    constant_range : Optional[float], default=None
+        Range for ephemeral random constants.
+    selector : Union[str, Callable], default="tournament"
+        Selection operator name or callable.
+    initializer : Union[str, Callable], default="rhh"
+        Population initializer name or callable.
+    crossover : Union[str, Callable], default="single_point"
+        Crossover operator name or callable.
+    mutation : Union[str, Callable], default="subtree"
+        Mutation operator name or callable.
+    fitness_function : Union[str, Callable], default="rmse"
+        Fitness function name ("rmse", "mse", "mae", "r2") or callable.
+        The callable should accept (y_true, y_pred) where y_pred has shape
+        (n_individuals, n_samples) and return fitness values with shape (n_individuals,).
+    **params
+        Additional parameters including:
+        - selector_args: dict for selector-specific arguments
+        - initializer_args: dict for initializer-specific arguments
+        - crossover_args: dict for crossover-specific arguments
+        - mutation_args: dict for mutation-specific arguments
+    """
+    
+    def __init__(
+        self,
+        population_size: int = 100, 
+        init_depth: int = 2,
+        max_depth: int = 6, 
+        p_xo: float = 0.8, 
+        random_state: int = 42,
+        normalize: bool = False,
         
-        NormalizationMixin.__init__(self, normalize=normalize,
-                                    X_scaler=X_scaler, y_scaler=y_scaler)
+        preset: Optional[str] = None,
+        
+        functions: Optional[FunctionSet] = None,
+        constant_range: Optional[float] = None,
+        selector: Union[str, Callable] = "tournament",
+        initializer: Union[str, Callable] = "rhh",
+        crossover: Union[str, Callable] = "single_point",
+        mutation: Union[str, Callable] = "subtree",
+        fitness_function: Union[str, Callable[[Array, Array], Array]] = "rmse",
+        
+        X_scaler=None,
+        y_scaler=None, 
+        **params,
+    ) -> None:
+        
+        NormalizationMixin.__init__(
+            self, normalize=normalize, X_scaler=X_scaler, y_scaler=y_scaler
+        )
         
         # Validate parameters
         if population_size < 1:
@@ -52,35 +103,72 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
             raise ValueError(f"p_xo must be in [0, 1], got {p_xo}")
         
         # basic configurations
-        self.population_size    = population_size
-        self.init_depth         = init_depth
-        self.max_depth          = max_depth
-        self.p_xo               = p_xo
-        self.random_state       = random_state
-        self.normalize          = normalize
+        self.population_size = population_size
+        self.init_depth = init_depth
+        self.max_depth = max_depth
+        self.p_xo = p_xo
+        self.random_state = random_state
+        self.normalize = normalize
         
         # advanced configurations
-        self.preset             = preset
-        self.constant_range    = constant_range
-        self.functions          = functions
-        self.selector           = selector
-        self.initializer        = initializer
-        self.crossover          = crossover
-        self.mutation           = mutation
-        self.params             = params
+        self.preset = preset
+        self.constant_range = constant_range
+        self.functions = functions
+        self.selector = selector
+        self.initializer = initializer
+        self.crossover = crossover
+        self.mutation = mutation
+        self.fitness_function = fitness_function
+        self.params = params
         
         # component-specific kwargs
-        self.selector_params    = params.get("selector_args", {})
+        self.selector_params = params.get("selector_args", {})
         self.initializer_params = params.get("initializer_args", {})
-        self.crossover_params   = params.get("crossover_args", {})
-        self.mutation_params    = params.get("mutation_args", {})
-        
-        self.params             = params 
+        self.crossover_params = params.get("crossover_args", {})
+        self.mutation_params = params.get("mutation_args", {})
         
         self._is_fitted = False
         self._n_generations_completed = 0  # Track total generations across warmstarts
     
-    def fit(self, X, y, X_test=None, y_test=None, n_gen: int = 2000, verbose: int = 0, warm_start: bool = False): 
+    def fit(
+        self,
+        X,
+        y,
+        X_test=None,
+        y_test=None,
+        n_gen: int = 2000,
+        verbose: Union[int, str] = 0,
+        warm_start: bool = False,
+    ):
+        """
+        Fit the GP regressor to training data.
+        
+        Parameters
+        ----------
+        X : array-like
+            Training input features.
+        y : array-like
+            Training target values.
+        X_test : array-like, optional
+            Test input features for tracking generalization.
+        y_test : array-like, optional
+            Test target values for tracking generalization.
+        n_gen : int, default=2000
+            Number of generations to evolve.
+        verbose : Union[int, str], default=0
+            Verbosity level:
+            - 0: Silent
+            - 1: Print every generation
+            - N (int > 1): Print every N generations  
+            - "bar": Show tqdm progress bar
+        warm_start : bool, default=False
+            If True, continue from existing population instead of reinitializing.
+            
+        Returns
+        -------
+        self
+            Fitted regressor.
+        """
         if y is None:
             raise ValueError("y must be provided for GPRegressor.fit")
         
@@ -178,18 +266,19 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
             
             # Continue evolution
             population, best_individual, new_log = GPevo(
-                population = population,
-                X = X_combined,
-                y = y_combined,
-                primitive_set = self.primitive_set_,
-                selector = self.selector_,
-                variator = self.variator_,
-                rng = self._rng_,
-                n_generations = n_gen,
-                max_depth = self.max_depth,
-                train_slice = train_slice,
-                test_slice = test_slice,
-                verbose = verbose,
+                population=population,
+                X=X_combined,
+                y=y_combined,
+                primitive_set=self.primitive_set_,
+                selector=self.selector_,
+                variator=self.variator_,
+                rng=self._rng_,
+                n_generations=n_gen,
+                max_depth=self.max_depth,
+                train_slice=train_slice,
+                test_slice=test_slice,
+                verbose=verbose,
+                fitness_function=self.fitness_function,  # Pass original (string or callable)
             )
             
             # Merge logs (append new generations to existing log)
@@ -248,18 +337,19 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
             population = Population(individuals)
             
             population, best_individual, log = GPevo(
-                population = population,
-                X = X_combined,
-                y = y_combined,
-                primitive_set = self.primitive_set_,
-                selector = self.selector_,
-                variator = self.variator_,
-                rng = self._rng_,
-                n_generations = n_gen,
-                max_depth = self.max_depth,
-                train_slice = train_slice,
-                test_slice = test_slice,
-                verbose = verbose,
+                population=population,
+                X=X_combined,
+                y=y_combined,
+                primitive_set=self.primitive_set_,
+                selector=self.selector_,
+                variator=self.variator_,
+                rng=self._rng_,
+                n_generations=n_gen,
+                max_depth=self.max_depth,
+                train_slice=train_slice,
+                test_slice=test_slice,
+                verbose=verbose,
+                fitness_function=self.fitness_function,  # Pass original (string or callable)
             )
             
             self.population_ = population
@@ -423,3 +513,17 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
         
         self.mutation_ = fetch_mutation(self.mutation, **mut_kwargs)
         return self.mutation_
+
+    def _resolve_fitness_function(self) -> Callable[[Array, Array], Array]:
+        """
+        Resolve the fitness function from string name or callable.
+        
+        Returns
+        -------
+        Callable
+            Fitness function that accepts (y_true, y_pred) and returns fitness values.
+        """
+        if callable(self.fitness_function):
+            return self.fitness_function
+        
+        return fetch_fitness(self.fitness_function)

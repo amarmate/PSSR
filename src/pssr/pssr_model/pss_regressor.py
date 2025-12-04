@@ -13,6 +13,7 @@ import numpy as np
 import numpy.typing as npt
 from sklearn.base import RegressorMixin
 
+from pssr.core.fitness import fetch_fitness
 from pssr.core.normalization import NormalizationMixin
 from pssr.core.primitives import FunctionSet, PrimitiveSet
 from pssr.core.representations.population import Population
@@ -20,15 +21,15 @@ from pssr.core.selection import fetch_selector
 from pssr.gp.gp_evolution import GPevo
 from pssr.gp.gp_initialization import fetch_initializer
 from pssr.gp.gp_variation import fetch_crossover, fetch_mutation, variator_fun
-from pssr.pssr_model.specialist import Specialist, create_specialists_from_population
 from pssr.pssr_model.ensemble_individual import EnsembleIndividual
 from pssr.pssr_model.ensemble_initialization import ensemble_initializer
 from pssr.pssr_model.ensemble_operators import (
+    ensemble_variator,
     fetch_ensemble_crossover,
     fetch_ensemble_mutation,
-    ensemble_variator,
 )
 from pssr.pssr_model.pss_presets import fetch_pss_preset
+from pssr.pssr_model.specialist import Specialist, create_specialists_from_population
 
 Array = npt.NDArray[np.float64]
 
@@ -97,6 +98,9 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         Functions for condition trees (default: same as functions)
     constant_range : float
         Range for constant terminals
+    fitness_function : Union[str, Callable]
+        Fitness function name ("rmse", "mse", "mae", "r2") or callable.
+        The callable should accept (y_true, y_pred) and return fitness values.
     
     Attributes
     ----------
@@ -147,6 +151,9 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         condition_functions: Optional[Union[list[str], FunctionSet]] = None,
         constant_range: Optional[float] = None,
         
+        # Fitness function
+        fitness_function: Union[str, Callable[[Array, Array], Array]] = "rmse",
+        
         # Scalers
         X_scaler=None,
         y_scaler=None,
@@ -189,6 +196,9 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         self.condition_functions = condition_functions
         self.constant_range = constant_range
         
+        # Fitness function
+        self.fitness_function = fitness_function
+        
         # Component-specific kwargs
         self.params = params
         self.specialist_selector_params = params.get("specialist_selector_args", {})
@@ -210,7 +220,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         y_test=None,
         specialist_n_gen: int = 100,
         ensemble_n_gen: int = 100,
-        verbose: int = 0,
+        verbose: Union[int, str] = 0,
         warm_start: bool = False,
         warm_start_mode: str = "full",
     ):
@@ -234,8 +244,12 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             Number of generations for specialist training
         ensemble_n_gen : int
             Number of generations for ensemble evolution
-        verbose : int
-            Verbosity level (0: silent, 1: progress, 2: detailed)
+        verbose : Union[int, str]
+            Verbosity level:
+            - 0: Silent
+            - 1: Print every generation
+            - N (int > 1): Print every N generations
+            - "bar": Show tqdm progress bar
         warm_start : bool
             If True, continue training from existing population
         warm_start_mode : str
@@ -290,11 +304,14 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         # Initialize RNG
         self._rng()
         
+        # Check if verbose is "truthy" for logging (but not "bar" mode for header messages)
+        verbose_log = verbose and verbose != "bar"
+        
         # Handle warm start
         if warm_start and self._is_fitted:
             if warm_start_mode == "full":
                 # Continue specialist evolution, then rerun ensemble
-                if verbose > 0:
+                if verbose_log:
                     logger.info("=" * 60)
                     logger.info("Warm Start: Continuing Specialist Evolution")
                     logger.info("=" * 60)
@@ -308,7 +325,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
                 
             else:  # ensemble_only
                 # Keep specialists fixed, only rerun ensemble
-                if verbose > 0:
+                if verbose_log:
                     logger.info("=" * 60)
                     logger.info("Warm Start: Ensemble Only (specialists fixed)")
                     logger.info("=" * 60)
@@ -323,7 +340,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         
         self._is_fitted = True
         
-        if verbose > 0:
+        if verbose_log:
             logger.info("\n" + "=" * 60)
             logger.info("Training Complete")
             logger.info(f"Best ensemble fitness: {self.best_ensemble_.fitness:.6f}")
@@ -440,6 +457,12 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         if hasattr(self, "_preset_condition_functions"):
             return self._preset_condition_functions
         return self._get_functions()
+    
+    def _resolve_fitness_function(self) -> Callable[[Array, Array], Array]:
+        """Resolve the fitness function from string name or callable."""
+        if callable(self.fitness_function):
+            return self.fitness_function
+        return fetch_fitness(self.fitness_function)
     
     def _resolve_specialist_primitive_set(self, X: np.ndarray) -> None:
         """Create primitive set for specialist phase."""
@@ -572,7 +595,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         X_test: Optional[Array],
         y_test: Optional[Array],
         n_gen: int,
-        verbose: int,
+        verbose: Union[int, str],
     ) -> None:
         """
         Phase 1: Train specialist population using GPevo directly.
@@ -592,7 +615,8 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         verbose : int
             Verbosity level
         """
-        if verbose > 0:
+        verbose_log = verbose and verbose != "bar"
+        if verbose_log:
             logger.info("=" * 60)
             logger.info("Phase 1: Training Specialists")
             logger.info("=" * 60)
@@ -639,6 +663,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             train_slice=train_slice,
             test_slice=test_slice,
             verbose=verbose,
+            fitness_function=self.fitness_function,  # Pass original (string or callable)
         )
         
         self.specialist_population_ = population
@@ -646,7 +671,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         self.specialist_log_ = log
         self._specialist_generations_completed = n_gen
         
-        if verbose > 0:
+        if verbose_log:
             logger.info("\nSpecialist training complete.")
             logger.info(f"Best specialist fitness: {best_individual.fitness:.6f}")
     
@@ -657,7 +682,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         X_test: Optional[Array],
         y_test: Optional[Array],
         n_gen: int,
-        verbose: int,
+        verbose: Union[int, str],
     ) -> None:
         """Continue specialist evolution from existing population."""
         # Build combined data
@@ -705,6 +730,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             train_slice=train_slice,
             test_slice=test_slice,
             verbose=verbose,
+            fitness_function=self.fitness_function,  # Pass original (string or callable)
         )
         
         # Merge logs
@@ -714,7 +740,8 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         self.best_specialist_ = best_individual
         self._specialist_generations_completed += n_gen
         
-        if verbose > 0:
+        verbose_log = verbose and verbose != "bar"
+        if verbose_log:
             logger.info("\nSpecialist warm start complete.")
             logger.info(f"Best specialist fitness: {best_individual.fitness:.6f}")
     
@@ -725,7 +752,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         X_test: Optional[Array],
         y_test: Optional[Array],
         n_gen: int,
-        verbose: int,
+        verbose: Union[int, str],
     ) -> None:
         """
         Phase 2: Evolve ensemble trees using GPevo.
@@ -745,7 +772,8 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         verbose : int
             Verbosity level
         """
-        if verbose > 0:
+        verbose_log = verbose and verbose != "bar"
+        if verbose_log:
             logger.info("\n" + "=" * 60)
             logger.info("Phase 2: Evolving Ensemble")
             logger.info("=" * 60)
@@ -772,7 +800,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             X=X_combined,
         )
         
-        if verbose > 0:
+        if verbose_log:
             logger.info(f"Created {len(self.specialists_)} specialists")
         
         # Build ensemble primitive set
@@ -807,6 +835,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             test_slice=test_slice,
             elitism=1,
             verbose=verbose,
+            fitness_function=self.fitness_function,  # Pass original (string or callable)
         )
         
         self._ensemble_generations_completed = n_gen
@@ -818,7 +847,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         X_test: Optional[Array],
         y_test: Optional[Array],
         n_gen: int,
-        verbose: int,
+        verbose: Union[int, str],
     ) -> None:
         """Continue ensemble evolution from existing population."""
         # Build combined data
@@ -843,7 +872,8 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             X=X_combined,
         )
         
-        if verbose > 0:
+        verbose_log = verbose and verbose != "bar"
+        if verbose_log:
             logger.info(f"Using {len(self.specialists_)} existing specialists")
         
         # Update ensemble primitive set
@@ -880,6 +910,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             test_slice=test_slice,
             elitism=1,
             verbose=verbose,
+            fitness_function=self.fitness_function,  # Pass original (string or callable)
         )
         
         # Merge logs
@@ -889,7 +920,7 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         self.best_ensemble_ = best_ensemble
         self._ensemble_generations_completed += n_gen
         
-        if verbose > 0:
+        if verbose_log:
             logger.info("\nEnsemble warm start complete.")
             logger.info(f"Best ensemble fitness: {best_ensemble.fitness:.6f}")
     
