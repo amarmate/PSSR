@@ -1,6 +1,5 @@
-import numpy as np 
+import numpy as np
 import numpy.typing as npt
-
 from sklearn.base import BaseEstimator, clone
 from sklearn.preprocessing import StandardScaler
 

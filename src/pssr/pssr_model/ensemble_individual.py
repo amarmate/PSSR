@@ -14,7 +14,7 @@ Evaluation:
 - Else: use false_branch output
 """
 
-from typing import Optional, Union, Callable
+from typing import Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt

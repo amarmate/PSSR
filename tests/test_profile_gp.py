@@ -1,10 +1,10 @@
 """Profile GPRegressor to identify performance bottlenecks."""
 
 import cProfile
-import pstats
 import io
-from pathlib import Path
+import pstats
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -212,10 +212,11 @@ def benchmark_semantics_evaluation():
 
 
 if __name__ == "__main__":
+    from sklearn.metrics import mean_squared_error, r2_score
+
     gp, y_pred, X_test, y_test = profile_gp_regressor()
     
     # Print prediction accuracy
-    from sklearn.metrics import r2_score, mean_squared_error
     r2 = r2_score(y_test, y_pred)
     mse = mean_squared_error(y_test, y_pred)
     print(f"\nFinal Model Performance:")

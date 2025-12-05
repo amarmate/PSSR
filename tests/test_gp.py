@@ -1,9 +1,9 @@
 import numpy as np
+from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 
-from pssr import GPRegressor
 from datasets.data_loader import load_airfoil
-from sklearn.metrics import r2_score
+from pssr import GPRegressor
 
 def test_gp_fit_and_predict_shapes():
     X, y = load_airfoil()

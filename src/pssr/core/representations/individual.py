@@ -1,9 +1,10 @@
-from typing import Optional, Union, Callable
+from typing import Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
 
 from pssr.core.primitives import PrimitiveSet
+
 Array = npt.NDArray[np.float64]
 TreeRepr = Union[tuple, str]  # Tree is either (func_name, *children) or terminal name
 
