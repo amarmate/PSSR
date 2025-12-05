@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -14,6 +14,9 @@ from pssr.gp.gp_evolution import GPevo
 from pssr.gp.gp_initialization import fetch_initializer
 from pssr.gp.gp_presets import fetch_preset
 from pssr.gp.gp_variation import fetch_crossover, fetch_mutation, variator_fun
+
+if TYPE_CHECKING:
+    from pssr.core.callbacks import Callback
 
 Array = npt.NDArray[np.float64]
 
@@ -54,6 +57,13 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
         Fitness function name ("rmse", "mse", "mae", "r2") or callable.
         The callable should accept (y_true, y_pred) where y_pred has shape
         (n_individuals, n_samples) and return fitness values with shape (n_individuals,).
+    n_elites : int, default=1
+        Number of elite individuals to preserve across generations.
+        Set to 0 to disable elitism.
+    callbacks : Optional[list[Callback]], default=None
+        List of callback objects to monitor or interfere with the optimization.
+        Callbacks are called at the end of each generation.
+        Use callbacks for early stopping (e.g., EarlyStoppingCallback) or timeout logic.
     **params
         Additional parameters including:
         - selector_args: dict for selector-specific arguments
@@ -80,6 +90,8 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
         crossover: Union[str, Callable] = "single_point",
         mutation: Union[str, Callable] = "subtree",
         fitness_function: Union[str, Callable[[Array, Array], Array]] = "rmse",
+        n_elites: int = 1,
+        callbacks: Optional[list["Callback"]] = None,
         
         X_scaler=None,
         y_scaler=None, 
@@ -101,12 +113,16 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
             raise ValueError(f"init_depth ({init_depth}) must be <= max_depth ({max_depth})")
         if not 0.0 <= p_xo <= 1.0:
             raise ValueError(f"p_xo must be in [0, 1], got {p_xo}")
+        if n_elites < 0:
+            raise ValueError(f"n_elites must be >= 0, got {n_elites}")
         
         # basic configurations
         self.population_size = population_size
         self.init_depth = init_depth
         self.max_depth = max_depth
         self.p_xo = p_xo
+        self.n_elites = n_elites
+        self.callbacks = callbacks
         self.random_state = random_state
         self.normalize = normalize
         
@@ -277,8 +293,10 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
                 max_depth=self.max_depth,
                 train_slice=train_slice,
                 test_slice=test_slice,
+                elitism=self.n_elites,
                 verbose=verbose,
                 fitness_function=self.fitness_function,  # Pass original (string or callable)
+                callbacks=self.callbacks,
             )
             
             # Merge logs (append new generations to existing log)
@@ -348,8 +366,10 @@ class GPRegressor(NormalizationMixin, RegressorMixin):
                 max_depth=self.max_depth,
                 train_slice=train_slice,
                 test_slice=test_slice,
+                elitism=self.n_elites,
                 verbose=verbose,
                 fitness_function=self.fitness_function,  # Pass original (string or callable)
+                callbacks=self.callbacks,
             )
             
             self.population_ = population

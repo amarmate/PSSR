@@ -58,7 +58,6 @@ def profile_gp_regressor():
         selector="dalex",
         p_xo=0.8,
         selector_args={"particularity_pressure": 10.0},
-        fitness_function='r2'
     )
     
     print(f"\nGPRegressor settings:")
@@ -84,13 +83,7 @@ def profile_gp_regressor():
     ps.print_stats(30)  # Top 30 functions
     
     print(s.getvalue())
-    
-    # Save detailed profile to file
-    profile_file = Path("gp_regressor_profile.prof")
-    profiler.dump_stats(str(profile_file))
-    print(f"\nDetailed profile saved to: {profile_file}")
-    print("View with: python -m pstats gp_regressor_profile.prof")
-    
+        
     # Profile predict operation on test set
     print("\n" + "=" * 80)
     print("Profiling predict() operation on test set...")

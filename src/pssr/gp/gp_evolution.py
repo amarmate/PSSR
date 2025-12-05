@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from typing import Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -14,6 +14,9 @@ from pssr.core.representations.individual import Individual
 from pssr.core.representations.population import Population
 from pssr.core.verbose import VerboseHandler
 from pssr.gp.gp_utils import LogDict, init_log, print_verbose_report, update_log
+
+if TYPE_CHECKING:
+    from pssr.core.callbacks import Callback
 
 Array = npt.NDArray[np.float64]
 
@@ -34,6 +37,7 @@ def GPevo(
     verbose: Union[int, str] = 0,
     fitness_function: Union[str, Callable[[Array, Array], Array]] = "rmse",
     maximize: Optional[bool] = None,
+    callbacks: Optional[list["Callback"]] = None,
 ) -> tuple[Population, Individual, LogDict]:
     """
     Main Genetic Programming evolutionary loop.
@@ -77,6 +81,10 @@ def GPevo(
     maximize : Optional[bool], default=None
         Whether higher fitness values are better. If None, automatically determined
         from the fitness function name (e.g., R² uses maximization).
+    callbacks : Optional[list[Callback]], default=None
+        List of callback objects to monitor or interfere with the optimization.
+        Callbacks are called at the end of each generation and can stop evolution early.
+        Use callbacks for early stopping (e.g., EarlyStoppingCallback) or timeout logic.
 
     Returns
     -------
@@ -115,6 +123,8 @@ def GPevo(
     # Initialize best_fitness based on optimization direction
     best_fitness = -np.inf if maximize else np.inf
     cumulative_time = 0.0
+    
+    _early_stopped = False  # Track if early stopping was triggered
     
     # Initialize verbose handler
     verbose_handler = VerboseHandler(verbose, n_generations)
@@ -207,8 +217,36 @@ def GPevo(
                     first=False,
                 )
             verbose_handler.update(generation, metrics)
+            
+            # Call callbacks (can stop evolution early)
+            if callbacks is not None:
+                for callback in callbacks:
+                    should_stop = callback.on_generation_end(
+                        generation=generation,
+                        population=population_obj,
+                        best_individual=best_individual,
+                        best_fitness=best_fitness,
+                        metrics=metrics,
+                    )
+                    if should_stop:
+                        _early_stopped = True
+                        break
+                if _early_stopped:
+                    break
     finally:
         verbose_handler.close()
+        
+        # Call on_evolution_end for all callbacks
+        if callbacks is not None:
+            final_generation = int(log["generation"][-1]) if log["generation"] else 0
+            for callback in callbacks:
+                callback.on_evolution_end(
+                    generations_completed=final_generation,
+                    population=population_obj,
+                    best_individual=best_individual,
+                    best_fitness=best_fitness,
+                    early_stopped=_early_stopped,
+                )
 
     return population_obj, best_individual, log
 

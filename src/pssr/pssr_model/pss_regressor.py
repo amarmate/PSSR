@@ -7,7 +7,7 @@ specialists with conditional routing.
 """
 
 import logging
-from typing import Callable, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -30,6 +30,9 @@ from pssr.pssr_model.ensemble_operators import (
 )
 from pssr.pssr_model.pss_presets import fetch_pss_preset
 from pssr.pssr_model.specialist import Specialist, create_specialists_from_population
+
+if TYPE_CHECKING:
+    from pssr.core.callbacks import Callback
 
 Array = npt.NDArray[np.float64]
 
@@ -84,6 +87,20 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
     # Variation parameters
     p_xo : float
         Probability of crossover vs mutation (for both phases)
+    
+    # Elitism parameters
+    specialist_n_elites : int
+        Number of elite individuals to preserve in specialist phase
+    ensemble_n_elites : int
+        Number of elite individuals to preserve in ensemble phase
+    
+    # Callbacks
+    specialist_callbacks : Optional[list[Callback]]
+        Callbacks for the specialist training phase.
+        Use callbacks for early stopping (e.g., EarlyStoppingCallback) or timeout logic.
+    ensemble_callbacks : Optional[list[Callback]]
+        Callbacks for the ensemble training phase.
+        Use callbacks for early stopping (e.g., EarlyStoppingCallback) or timeout logic.
     
     # General parameters
     random_state : int
@@ -142,6 +159,14 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         # Variation parameters
         p_xo: float = 0.5,
         
+        # Elitism parameters
+        specialist_n_elites: int = 1,
+        ensemble_n_elites: int = 1,
+        
+        # Callbacks
+        specialist_callbacks: Optional[list["Callback"]] = None,
+        ensemble_callbacks: Optional[list["Callback"]] = None,
+        
         # General parameters
         random_state: int = 42,
         normalize: bool = False,
@@ -186,6 +211,18 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
         
         # Variation
         self.p_xo = p_xo
+        
+        # Elitism
+        if specialist_n_elites < 0:
+            raise ValueError(f"specialist_n_elites must be >= 0, got {specialist_n_elites}")
+        if ensemble_n_elites < 0:
+            raise ValueError(f"ensemble_n_elites must be >= 0, got {ensemble_n_elites}")
+        self.specialist_n_elites = specialist_n_elites
+        self.ensemble_n_elites = ensemble_n_elites
+        
+        # Callbacks
+        self.specialist_callbacks = specialist_callbacks
+        self.ensemble_callbacks = ensemble_callbacks
         
         # General
         self.random_state = random_state
@@ -662,8 +699,10 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             max_depth=self.specialist_max_depth,
             train_slice=train_slice,
             test_slice=test_slice,
+            elitism=self.specialist_n_elites,
             verbose=verbose,
             fitness_function=self.fitness_function,  # Pass original (string or callable)
+            callbacks=self.specialist_callbacks,
         )
         
         self.specialist_population_ = population
@@ -729,8 +768,10 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             max_depth=self.specialist_max_depth,
             train_slice=train_slice,
             test_slice=test_slice,
+            elitism=self.specialist_n_elites,
             verbose=verbose,
             fitness_function=self.fitness_function,  # Pass original (string or callable)
+            callbacks=self.specialist_callbacks,
         )
         
         # Merge logs
@@ -833,9 +874,10 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             max_depth=self.ensemble_max_depth,
             train_slice=train_slice,
             test_slice=test_slice,
-            elitism=1,
+            elitism=self.ensemble_n_elites,
             verbose=verbose,
             fitness_function=self.fitness_function,  # Pass original (string or callable)
+            callbacks=self.ensemble_callbacks,
         )
         
         self._ensemble_generations_completed = n_gen
@@ -908,9 +950,10 @@ class PSSRegressor(NormalizationMixin, RegressorMixin):
             max_depth=self.ensemble_max_depth,
             train_slice=train_slice,
             test_slice=test_slice,
-            elitism=1,
+            elitism=self.ensemble_n_elites,
             verbose=verbose,
             fitness_function=self.fitness_function,  # Pass original (string or callable)
+            callbacks=self.ensemble_callbacks,
         )
         
         # Merge logs
